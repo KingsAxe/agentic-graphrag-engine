@@ -1,0 +1,10 @@
+streamlit
+langchain
+langchain-community
+langchain-postgres
+langchain-huggingface
+llama-cpp-python
+psycopg2-binary
+pymupdf
+sentence-transformers
+python-dotenv

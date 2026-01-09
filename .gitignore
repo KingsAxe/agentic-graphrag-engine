@@ -1,0 +1,27 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environments & Secrets
+LRE/
+.env
+.venv
+env/
+venv/
+.streamlit/secrets.toml
+
+# Local Models (The heavy stuff)
+# We keep the folders but ignore the large binary files
+models/llm/*.gguf
+models/embeddings/**
+
+# Local Data & Database
+data/
+postgres_data/
+
+# OS and IDE files
+.DS_Store
+.idea/
+.vscode/
+*.log
