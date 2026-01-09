@@ -1,5 +1,6 @@
 streamlit
 langchain
+langchain-core
 langchain-community
 langchain-postgres
 langchain-huggingface
@@ -8,3 +9,4 @@ psycopg2-binary
 pymupdf
 sentence-transformers
 python-dotenv
+langchain-text-splitters

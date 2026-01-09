@@ -18,6 +18,11 @@ def clean_text(text: str) -> str:
     Cleans extracted PDF text for better embedding quality.
     Removes redundant whitespaces, newlines, and artifacts.
     """
+    if not text:
+        return ""
+
+    # Remove NULL characters (0x00) that crash Postgres
+    text = text.replace('\x00', '')
     # Replace multiple newlines with a single space
     text = re.sub(r'\n+', ' ', text)
     # Remove extra spaces

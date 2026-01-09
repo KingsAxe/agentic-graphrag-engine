@@ -1,14 +1,31 @@
 import hashlib
+import os
 from langchain_community.embeddings import HuggingFaceBgeEmbeddings
 from langchain_community.document_loaders import PyMuPDFLoader
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+
+
+try:
+    from utils.helpers import clean_text
+except ImportError:
+    from app.utils.helpers import clean_text
+
+# from app.utils.helpers import clean_text
+
 
 class DocumentIngestor:
-    def __init__(self, model_folder: str):
-        # Pointing to your local folder
+    def __init__(self, model_folder: str = None):
+
+        # Convert to absolute path so HuggingFace knows it's a local folder
+        abs_path = os.path.abspath(model_folder)
+
+        # Fail-safe: if None is passed, use a hardcoded fallback or raise a clearer error
+        if abs_path is None:
+            raise ValueError("model_folder path cannot be None. Check your .env file.")
+            
         self.embeddings = HuggingFaceBgeEmbeddings(
             model_name=model_folder,
-            model_kwargs={'device': 'cpu'}, # Switch to 'cuda' if you have a GPU
+            model_kwargs={'device': 'cpu'},
             encode_kwargs={'normalize_embeddings': True}
         )
         self.text_splitter = RecursiveCharacterTextSplitter(
@@ -28,5 +45,10 @@ class DocumentIngestor:
         """Extracts text and splits into chunks."""
         loader = PyMuPDFLoader(file_path)
         documents = loader.load()
+
+        # CLEAN THE TEXT IN EACH DOCUMENT OBJECT
+        for doc in documents:
+            doc.page_content = clean_text(doc.page_content)
+
         chunks = self.text_splitter.split_documents(documents)
         return chunks
