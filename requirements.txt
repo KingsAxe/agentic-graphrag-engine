@@ -10,3 +10,5 @@ pymupdf
 sentence-transformers
 python-dotenv
 langchain-text-splitters
+rank-bm25
+fastapi

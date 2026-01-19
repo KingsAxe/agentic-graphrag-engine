@@ -62,5 +62,43 @@ To test if it's "Paper-Worthy," perform these three tests:
 
 
 
-
+local-rag-engine/
+├── .env                        # Configuration (DB URLs, paths, keys)
+├── .gitignore                  # Prevents committing weights/logs/env
+├── docker-compose.yml          # Orchestrates Postgres + pgvector
+├── README.md                   # Project documentation & setup guide
+├── requirements.txt            # Python dependencies (pinned versions)
+│
+├── app/                        # Main Application Package
+│   ├── __init__.py             # Makes app a package
+│   ├── main.py                 # Streamlit UI & Event Loop
+│   │
+│   ├── core/                   # The Intelligence Layer
+│   │   ├── __init__.py
+│   │   ├── ingestor.py         # PDF parsing, hashing & chunking
+│   │   ├── model_manager.py    # Local LLM (.gguf) loading & VRAM mgmt
+│   │   └── rag_chain.py        # LCEL chains & Chat History logic
+│   │
+│   ├── database/               # The Persistence Layer
+│   │   ├── __init__.py
+│   │   ├── connection.py       # PGVector init & metadata queries
+│   │   └── schema.sql          # Manual SQL table definitions
+│   │
+│   └── utils/                  # The Utility Layer
+│       ├── __init__.py
+│       └── helpers.py          # Text cleaning & SHA-256 utilities
+│
+├── models/                     # Model Weight Storage (Excluded from Git)
+│   ├── embeddings/             # Embedding model folders (config.json, etc.)
+│   │   └── bge-small-en-v1.5/
+│   └── llms/                   # Quantized .gguf files
+│       └── llama-3.1-8b-q4_k_m.gguf
+│
+├── data/                       # Local Document Storage
+│   ├── raw/                    # Uploaded source PDFs
+│   └── processed/              # (Optional) Metadata backups
+│
+└── scripts/                    # Research & Dev Automation
+    ├── benchmark.py            # Automated performance testing (TTFT/TPS)
+    └── setup_db.py             # Database & pgvector initialization
 

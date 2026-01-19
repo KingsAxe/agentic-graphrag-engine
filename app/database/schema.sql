@@ -1,32 +1,54 @@
--- Enable the vector extension
+-- 1. Enable the pgvector extension to work with embeddings
 CREATE EXTENSION IF NOT EXISTS vector;
 
--- 1. Document Metadata (The "Knowledge Source")
-CREATE TABLE IF NOT EXISTS documents (
-    id SERIAL PRIMARY KEY,
-    filename TEXT NOT NULL,
-    file_hash TEXT UNIQUE NOT NULL, -- SHA-256 to prevent duplicates
-    upload_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    metadata JSONB                  -- Store page counts, author, etc.
+-- 2. LangChain standard tables for PGVector (Collection Management)
+CREATE TABLE IF NOT EXISTS langchain_pg_collection (
+    name VARCHAR,
+    cmetadata JSONB,
+    uuid UUID PRIMARY KEY
 );
 
--- 2. Document Chunks (The "Semantic Layer")
-CREATE TABLE IF NOT EXISTS document_chunks (
-    id SERIAL PRIMARY KEY,
-    document_id INTEGER REFERENCES documents(id) ON DELETE CASCADE,
-    content TEXT NOT NULL,
-    embedding vector(384),          -- 384 for 'all-MiniLM-L6-v2'
-    page_number INTEGER
+-- 3. LangChain standard tables for PGVector (Embedding Storage)
+CREATE TABLE IF NOT EXISTS langchain_pg_embedding (
+    collection_id UUID REFERENCES langchain_pg_collection(uuid) ON DELETE CASCADE,
+    embedding VECTOR(384), -- Adjusted for BGE-Small (384 dimensions). Change to 768 for BGE-Base.
+    document TEXT,
+    cmetadata JSONB,
+    custom_id VARCHAR,
+    uuid UUID PRIMARY KEY
 );
 
--- 3. Chat Sessions & History (The "Memory Layer")
+-- 4. Persistent Chat History (Used by PostgresChatMessageHistory)
 CREATE TABLE IF NOT EXISTS chat_history (
     id SERIAL PRIMARY KEY,
-    session_id TEXT NOT NULL,       -- Unique ID for each chat window
-    role TEXT NOT NULL,             -- 'user' or 'assistant'
-    message TEXT NOT NULL,
+    session_id VARCHAR(255) NOT NULL,
+    message JSONB NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Create an HNSW index for fast vector search (Scale-ready)
-CREATE INDEX ON document_chunks USING hnsw (embedding vector_cosine_ops);
+-- 5. PHASE 3: The Research Notebook (Crystallized Knowledge)
+-- This table stores verified insights that have been audited and approved.
+CREATE TABLE IF NOT EXISTS research_entries (
+    id SERIAL PRIMARY KEY,
+    session_id VARCHAR(255) NOT NULL,
+    query_text TEXT NOT NULL,
+    answer_text TEXT NOT NULL,
+    
+    -- Epistemic Metadata (Phase 1)
+    epistemic_score FLOAT,
+    reasoning_path TEXT,
+    
+    -- Evidence & Audit (Phase 2)
+    citations JSONB, -- Stores source names, pages, and chunk hashes
+    
+    -- Knowledge Lifecycle (Phase 3)
+    verification_status VARCHAR(50) DEFAULT 'pending', -- 'pending', 'verified', 'rejected'
+    user_notes TEXT, -- Professional annotations by the researcher
+    
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 6. Performance Indices
+CREATE INDEX IF NOT EXISTS idx_chat_session ON chat_history(session_id);
+CREATE INDEX IF NOT EXISTS idx_research_session ON research_entries(session_id);
+CREATE INDEX IF NOT EXISTS idx_verification ON research_entries(verification_status);
