@@ -22,6 +22,7 @@ from app.database.connection import get_vector_store
 from app.database.research_manager import ResearchManager
 
 import json
+import psycopg2
 
 CONFIG_FILE = os.path.join(os.getcwd(), "config.json")
 
@@ -259,6 +260,53 @@ async def update_settings(payload: SettingsPayload):
 
     return {"status": "ok", "llm_models_dir": LLM_DIR, "default_llm_model": DEFAULT_MODEL}
 
+
+from pathlib import Path
+
+@app.get("/library")
+async def library():
+    """
+    Shows documents known to the vector store, even if the raw PDF was deleted.
+    Returns: filename, stored_path, available, chunks, max_page, preview
+    """
+    conn = psycopg2.connect(DB_URL)
+    cur = conn.cursor()
+
+    # Works with LangChain PGVector tables (document + cmetadata JSONB)
+    cur.execute("""
+        SELECT
+            COALESCE(cmetadata->>'filename', split_part(cmetadata->>'source', '/', array_length(string_to_array(cmetadata->>'source','/'),1))) AS filename,
+            COALESCE(cmetadata->>'stored_path', cmetadata->>'source') AS stored_path,
+            COUNT(*) AS chunks,
+            MAX(NULLIF(cmetadata->>'page','')::int) AS max_page,
+            LEFT(MAX(document), 400) AS preview
+        FROM langchain_pg_embedding
+        GROUP BY 1,2
+        ORDER BY chunks DESC;
+    """)
+
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+
+    out = []
+    for filename, stored_path, chunks, max_page, preview in rows:
+        available = False
+        try:
+            available = Path(stored_path).exists()
+        except Exception:
+            available = False
+
+        out.append({
+            "filename": filename,
+            "stored_path": stored_path,
+            "available": available,   # file exists on disk?
+            "chunks": int(chunks),
+            "max_page": int(max_page) if max_page is not None else None,
+            "preview": preview or "",
+        })
+
+    return {"documents": out}
 
 
 @app.post("/verify")
