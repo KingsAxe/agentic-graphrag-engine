@@ -1,112 +1,286 @@
 """
-FastAPI + Pydantic: By using the .dict() method on your ResearchResponse, the API automatically converts your complex "Belief Report" and "Citations" into a clean JSON object that a frontend (React/Svelte) can easily parse.
+Sovereign Research Engine API (FastAPI)
 
-Concurrency Ready: FastAPI is asynchronous. While the LLM inference is synchronous (blocking), the API can still handle incoming metadata requests or document uploads without freezing the whole system.
-
-Local Loopback Only: By forcing host="127.0.0.1", you ensure that even if a user is on a public Wi-Fi, no one else can "hit" your research engine. It remains truly sovereign and private.
+- Local loopback only (127.0.0.1)
+- Directory-based model discovery + optional default model
+- Health endpoints for backend-first testing (and later Tauri readiness)
+- Clear env validation + safer path handling on Windows/packaged mode
 """
 
-
-
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form
+from fastapi import FastAPI, HTTPException, UploadFile, File
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import Optional
 import os
 import shutil
+from dotenv import load_dotenv
 
 # Import your existing engine logic
-from core.model_manager import ModelManager
-from core.ingestor import DocumentIngestor
-from core.rag_chain import RAGEngine
-from database.connection import get_vector_store
-from database.research_manager import ResearchManager
+from app.core.model_manager import ModelManager
+from app.core.ingestor import DocumentIngestor
+from app.core.rag_chain import RAGEngine
+from app.database.connection import get_vector_store
+from app.database.research_manager import ResearchManager
+
+import json
+
+CONFIG_FILE = os.path.join(os.getcwd(), "config.json")
+
+def load_config() -> dict:
+    if os.path.exists(CONFIG_FILE):
+        try:
+            with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+    return {}
+
+def save_config(cfg: dict) -> None:
+    with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+        json.dump(cfg, f, indent=2)
+
+_cfg = load_config()
+
+
+
+# 1) Load .env variables (dev mode)
+load_dotenv()
 
 app = FastAPI(title="Sovereign Research Engine API")
 
-# --- Configuration ---
-DB_URL = os.getenv("DATABASE_URL", "postgresql://user:pass@localhost:5432/vectors")
-EMBED_PATH = os.getenv("EMBEDDING_MODEL_PATH", "models/embeddings/bge-small-en-v1.5")
-model_manager = ModelManager()
+# -----------------------------
+# Configuration (strict)
+# -----------------------------
+DB_URL = os.getenv("DATABASE_URL")
+if not DB_URL:
+    raise ValueError("DATABASE_URL not found in .env file.")
+
+EMBED_PATH = os.getenv("EMBEDDING_MODEL_PATH")
+if not EMBED_PATH:
+    raise ValueError("EMBEDDING_MODEL_PATH not found in .env file.")
+
+LLM_DIR = os.getenv("LLM_MODELS_DIR") or _cfg.get("LLM_MODELS_DIR")
+if not LLM_DIR:
+    raise ValueError("LLM_MODELS_DIR not found in .env file.")
+LLM_DIR = os.path.abspath(LLM_DIR)if LLM_DIR else ""
+
+# Use filename as default model (NOT a full path)
+DEFAULT_MODEL = os.getenv("DEFAULT_LLM_MODEL") or _cfg.get("DEFAULT_LLM_MODEL")
+DEFAULT_MODEL = os.path.basename(DEFAULT_MODEL) or ""
+if not DEFAULT_MODEL:
+    raise ValueError("DEFAULT_LLM_MODEL not found in .env file (expected a .gguf filename).")
+
+# Initialize Managers (singletons for dev)
+model_manager = ModelManager(models_dir=LLM_DIR) if LLM_DIR else None
 res_manager = ResearchManager(DB_URL)
 
-# --- Request/Response Models ---
+# Optional: initialize once (avoids re-creating on every request)
+# If your get_vector_store is heavy, this is a big win for local dev.
+VECTOR_STORE = get_vector_store(DB_URL, EMBED_PATH)
+
+
+# -----------------------------
+# Request/Response Models
+# -----------------------------
 class QueryRequest(BaseModel):
     input_text: str
     session_id: str
+    model_name: Optional[str] = None  # optional for backend-first testing
     mode: str = "precision"
+
 
 class VerificationRequest(BaseModel):
     entry_id: int
     status: str
     notes: Optional[str] = None
 
-# --- Endpoints ---
+
+# -----------------------------
+# Basic endpoints (dev/test)
+# -----------------------------
+
+class SettingsPayload(BaseModel):
+    llm_models_dir: str
+    default_llm_model: Optional[str] = None
+
+@app.get("/settings")
+async def get_settings():
+    cfg = load_config()
+    return {
+        "llm_models_dir": cfg.get("LLM_MODELS_DIR", ""),
+        "default_llm_model": cfg.get("DEFAULT_LLM_MODEL", "")
+    }
+
+
+@app.get("/")
+async def root():
+    return {
+        "status": "ok",
+        "service": "Sovereign Research Engine API",
+        "docs": "/docs",
+        "health": "/health",
+    }
+
+
+@app.get("/health")
+async def health():
+    return {"status": "ok"}
+
+
+# -----------------------------
+# Core endpoints
+# -----------------------------
+@app.get("/models")
+async def list_models():
+    if not LLM_DIR or not os.path.isdir(LLM_DIR) or model_manager is None:
+        return {"models": [], "default": DEFAULT_MODEL, "configured": False}
+    return {"models": model_manager.list_available_models(), "default": DEFAULT_MODEL, "configured": True}
+
 
 @app.post("/ingest")
 async def ingest_document(file: UploadFile = File(...)):
     """Handles PDF ingestion and vectorization."""
     try:
-        temp_path = f"data/raw/{file.filename}"
+        os.makedirs(os.path.join("data", "raw"), exist_ok=True)
+
+        temp_path = os.path.join("data", "raw", file.filename)
         with open(temp_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
-        
+
         ingestor = DocumentIngestor(DB_URL, EMBED_PATH)
         success = ingestor.ingest(temp_path)
-        
+
         if not success:
             raise HTTPException(status_code=500, detail="Ingestion failed.")
         return {"status": "success", "filename": file.filename}
+
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=f"Ingestion error: {e}")
+
 
 @app.post("/query")
 async def research_query(request: QueryRequest):
     """The main research synthesis endpoint."""
+    history_manager = None
     try:
-        # 1. Initialize Engine
-        # In production, we'd use a specific model file from config
-        llm = model_manager.load_model("llama-3.1-8b-q4_k_m.gguf") 
-        vector_store = get_vector_store(DB_URL, EMBED_PATH)
-        engine = RAGEngine(llm, vector_store, DB_URL)
-        
-        # 2. Get Knowledge & History
+        # Choose model: request override -> default
+        model_name = request.model_name or DEFAULT_MODEL
+
+        # Validate model existence in the models dir
+        model_path = os.path.join(LLM_DIR, model_name)
+        if not os.path.exists(model_path):
+            available = model_manager.list_available_models()
+            raise HTTPException(
+                status_code=404,
+                detail=(
+                    f"Model '{model_name}' not found in {LLM_DIR}. "
+                    f"Available: {available[:10]}{'...' if len(available) > 10 else ''}"
+                ),
+            )
+
+        # 1) Load LLM
+        llm = model_manager.load_model(model_name)
+
+        # 2) Initialize Engine
+        engine = RAGEngine(llm, VECTOR_STORE, DB_URL)
+
+        # 3) Get Knowledge & History
         history_manager = engine.get_chat_history(request.session_id)
         verified_context = res_manager.get_verified_knowledge(request.session_id)
-        
-        # 3. Execute Chain
-        chain = engine.create_chain(mode=request.mode)
-        response = chain.invoke({
-            "input": request.input_text,
-            "chat_history": history_manager.messages,
-            "verified_knowledge": verified_context
-        })
-        
-        # 4. Auto-save to pending research entries
+
+        # 4) Execute Chain
+        chain = engine.create_chain(mode=request.mode, verified_knowledge=verified_context)
+
+        response = chain.invoke(
+            {
+                "input": request.input_text,
+                "chat_history": history_manager.messages,
+                "verified_knowledge": verified_context,
+            }
+        )
+
+        # 5) Auto-save to pending research entries
         entry_id = res_manager.save_entry(request.session_id, request.input_text, response)
-        
-        # 5. Persist Chat History
+
+        # 6) Persist Chat History
         history_manager.add_user_message(request.input_text)
         history_manager.add_ai_message(response.answer)
-        
-        return {
-            "entry_id": entry_id,
-            "data": response.dict()
-        }
+
+        # pydantic v2: prefer model_dump(); v1: dict()
+        data = response.model_dump() if hasattr(response, "model_dump") else response.dict()
+
+        return {"entry_id": entry_id, "data": data}
+
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        print(f"Query Error: {e}")
+        raise HTTPException(status_code=500, detail=f"Query error: {e}")
+
+    finally:
+        # Close the psycopg connection we attached in RAGEngine.get_chat_history()
+        if history_manager is not None:
+            conn = getattr(history_manager, "_sre_conn", None)
+            if conn is not None:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+
+@app.post("/settings")
+async def update_settings(payload: SettingsPayload):
+    global LLM_DIR, DEFAULT_MODEL, model_manager
+
+    models_dir = os.path.abspath(payload.llm_models_dir)
+
+    if not os.path.isdir(models_dir):
+        raise HTTPException(status_code=400, detail=f"Directory does not exist: {models_dir}")
+
+    # If a default model is provided, validate it exists
+    default_model = payload.default_llm_model or ""
+    if default_model:
+        candidate = os.path.join(models_dir, default_model)
+        if not os.path.exists(candidate):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Default model not found in folder: {default_model}"
+            )
+
+    cfg = load_config()
+    cfg["LLM_MODELS_DIR"] = models_dir
+    cfg["DEFAULT_LLM_MODEL"] = default_model
+    save_config(cfg)
+
+    # Update runtime globals + reload model manager
+    LLM_DIR = models_dir
+    DEFAULT_MODEL = default_model
+    model_manager = ModelManager(models_dir=LLM_DIR)
+
+    return {"status": "ok", "llm_models_dir": LLM_DIR, "default_llm_model": DEFAULT_MODEL}
+
+
 
 @app.post("/verify")
 async def verify_entry(request: VerificationRequest):
     """Crystallizes a pending entry into the Lab Notebook."""
-    res_manager.verify_entry(request.entry_id, request.status, request.notes)
-    return {"status": "updated", "entry_id": request.entry_id}
+    try:
+        res_manager.verify_entry(request.entry_id, request.status, request.notes)
+        return {"status": "updated", "entry_id": request.entry_id}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Verify error: {e}")
+
 
 @app.get("/notebook/{session_id}")
 async def get_notebook(session_id: str):
     """Retrieves all research entries for a session."""
-    return res_manager.get_session_entries(session_id)
+    try:
+        return res_manager.get_session_entries(session_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Notebook error: {e}")
+
 
 if __name__ == "__main__":
     import uvicorn
-    # Only listen on localhost for security in the Tauri sidecar pattern
+
     uvicorn.run(app, host="127.0.0.1", port=8000)

@@ -1,0 +1,23 @@
+{
+  "tauri": {
+    "allowlist": {
+      "all": true,
+      "shell": {
+        "sidecar": true,
+        "scope": [
+          { "name": "research-engine", "sidecar": true }
+        ]
+      }
+    },
+    "bundle": {
+      "active": true,
+      "externalBin": [
+        "bin/research-engine"
+      ],
+      "resources": [
+        "models/**",
+        "data/**"
+      ]
+    }
+  }
+}

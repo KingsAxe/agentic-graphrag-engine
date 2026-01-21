@@ -1,14 +1,39 @@
-streamlit
-langchain
-langchain-core
-langchain-community
-langchain-postgres
-langchain-huggingface
-llama-cpp-python
-psycopg2-binary
-pymupdf
-sentence-transformers
-python-dotenv
-langchain-text-splitters
-rank-bm25
-fastapi
+# --- API / Server ---
+fastapi==0.128.0
+uvicorn==0.40.0
+python-dotenv==1.2.1
+
+# --- Data / DB ---
+psycopg==3.3.2
+psycopg-binary==3.3.2
+psycopg2-binary==2.9.11
+pgvector==0.3.6
+SQLAlchemy==2.0.45
+
+# --- LangChain stack (PINNED to your working versions) ---
+langchain==1.2.6
+langchain-core==1.2.7
+langchain-community==0.4.1
+langchain-postgres==0.0.16
+langchain-huggingface==1.2.0
+langchain-text-splitters==1.1.0
+
+# --- Embeddings / ML ---
+sentence-transformers==5.2.0
+transformers==4.57.3
+torch==2.9.1
+numpy==2.4.0
+
+# --- PDF ingestion ---
+PyMuPDF==1.26.7
+
+# --- Retrieval ---
+rank-bm25==0.2.2
+
+# --- Local LLM runtime ---
+llama-cpp-python==0.3.16
+
+# --- Optional (dev UI / legacy prototyping) ---
+streamlit==1.52.2
+python-multipart
+requests

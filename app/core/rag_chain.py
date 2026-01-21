@@ -1,13 +1,38 @@
-import os
-from typing import List, Optional, Dict, Any
+from typing import List, Any
+from pydantic import BaseModel, Field
+
+from typing import List, Any
 from pydantic import BaseModel, Field
 
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_core.output_parsers import PydanticOutputParser
+from langchain_core.runnables import RunnableLambda
+from langchain_community.retrievers import BM25Retriever
+
 from langchain_postgres import PostgresChatMessageHistory
-from langchain_core.runnables import RunnablePassthrough, RunnableLambda
-from langchain_community.retrievers import BM25Retriever,MultiQueryRetriever
-from langchain_community.retrievers import EnsembleRetriever
+
+# v1: retrievers moved to langchain-classic
+from langchain_classic.retrievers import MultiQueryRetriever, EnsembleRetriever
+
+
+import psycopg
+from langchain_postgres import PostgresChatMessageHistory
+import uuid
+
+def _normalize_pg_url(db_url: str) -> str:
+    # If you ever used SQLAlchemy style, normalize for psycopg
+    return (
+        db_url.replace("postgresql+psycopg://", "postgresql://")
+              .replace("postgresql+psycopg2://", "postgresql://")
+    )
+
+def _session_to_uuid(session_id: str) -> str:
+    try:
+        return str(uuid.UUID(session_id))
+    except ValueError:
+        # Deterministic UUID from an arbitrary string
+        return str(uuid.uuid5(uuid.NAMESPACE_URL, session_id))
+
+
 
 # --- PHASE 1: Epistemic Schemas ---
 
@@ -36,13 +61,36 @@ class RAGEngine:
         # This is the 'Masterpiece' standard for 2026
         self.structured_llm = self.llm.with_structured_output(ResearchResponse)
 
+    
+
     def get_chat_history(self, session_id: str):
-        # Using the positional argument fix we implemented earlier
-        return PostgresChatMessageHistory(
-            "chat_history", 
-            session_id, 
-            connection=self.db_url
+        conninfo = _normalize_pg_url(self.db_url)
+
+        # Create a short-lived connection per request (safe for now)
+        conn = psycopg.connect(conninfo)
+
+        try:
+            # Test if table exists  
+            # Ensure table exists (safe to call repeatedly during dev)
+            PostgresChatMessageHistory.create_tables(conn, "chat_history")
+        except Exception:
+            pass
+
+        session_uuid = _session_to_uuid(session_id)
+
+        history = PostgresChatMessageHistory(
+            "chat_history",
+            session_uuid,
+            sync_connection=conn
         )
+
+        # attach connection so API can close it after using history
+        history._sre_conn = conn
+        return history
+    
+
+
+
 
     def _get_retriever(self, mode: str = "precision", documents: List[Any] = None):
         base_vector_retriever = self.vector_store.as_retriever(search_kwargs={"k": 5})
@@ -91,7 +139,8 @@ class RAGEngine:
         # 3. Construct the LCEL Graph with verified_knowledge injection
         chain = (
             {
-                "context": (lambda x: x["input"]) | retriever | format_docs,
+                # "context": (lambda x: x["input"]) | retriever | format_docs,
+                "context": RunnableLambda(lambda x: x["input"]) | retriever | RunnableLambda(format_docs),
                 "verified_knowledge": lambda x: x.get("verified_knowledge", "No verified knowledge available yet."),
                 "input": lambda x: x["input"],
                 "chat_history": lambda x: x.get("chat_history", [])

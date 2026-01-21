@@ -4,6 +4,7 @@ __pycache__/
 *$py.class
 
 # Environments & Secrets
+README_forme.md
 LRE/
 .env
 .venv
@@ -25,3 +26,65 @@ postgres_data/
 .idea/
 .vscode/
 *.log
+
+
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+
+# Rust/Tauri Build Artifacts
+src-tauri/target/
+src-tauri/bin/*.exe
+src-tauri/bin/*-apple-darwin
+src-tauri/bin/*-pc-windows-msvc
+
+# Database
+postgres_data/
+
+
+# --- Broad Ignores ---
+node_modules/
+**/node_modules/
+dist/
+**/dist/
+__pycache__/
+.env
+*.log
+
+# --- Heavy AI Models (Force ignore all contents) ---
+models/
+data/
+LRE/
+
+# --- Rust & Tauri ---
+src-tauri/target/
+src-tauri/bin/
+
+
+# PyInstaller / Build Artifacts
+build/
+dist/
+*.spec
