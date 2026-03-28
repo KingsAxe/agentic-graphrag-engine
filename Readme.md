@@ -1,211 +1,172 @@
-## **Sovereign Research Engine**
+# Sovereign Research Engine
 
-The Decoupled Sovereignty Pattern for High-Fidelity Knowledge Synthesis
+Local-first RAG for serious research.
 
-### **Introduction**
+Sovereign Research Engine is a privacy-preserving research workbench built for high-stakes knowledge synthesis. Instead of optimizing for generic chatbot behavior, it focuses on grounded retrieval, explicit reasoning audits, persistent knowledge capture, and full control over data, models, and storage.
 
-The Sovereign Research Engine is a local-first, privacy-preserving Retrieval-Augmented Generation (RAG) system designed for high-stakes research environments. Unlike traditional “chatbots” that prioritize conversational fluidity, this engine prioritizes epistemic integrity, data sovereignty, and auditability.
+The project follows a decoupled architecture:
 
-It operates on the Decoupled Sovereignty Pattern, an architectural approach that separates the reasoning logic (Python/LLM) from the persistent memory (PostgreSQL) and the user interface (Streamlit). This ensures that the researcher retains ownership of their data, models, and crystallized knowledge, independent of cloud providers or API availability.
+- FastAPI handles orchestration and query endpoints.
+- PostgreSQL with pgvector stores embeddings, citations, notebook entries, and chat state.
+- Streamlit provides the research workbench UI.
+- Local GGUF models and embedding models keep inference under operator control.
 
-### **Problem Statement**
+## Why it exists
 
-Modern RAG demos often fail in real research settings due to:
+Most RAG demos break down in real research workflows:
 
-- Contextual amnesia: knowledge is trapped in ephemeral chat logs.
+- Answers disappear into chat logs instead of becoming reusable knowledge.
+- Retrieval misses exact technical terms, codes, and acronyms.
+- Model confidence is implied, not inspected.
+- Cloud-first tooling introduces privacy and IP risk.
 
-- Hallucination opacity: answers appear confident without evidence-based audit.
+Sovereign Research Engine is designed to fix those issues with an auditable, database-backed workflow.
 
-- Fragile retrieval: semantic-only search misses acronyms, codes, and exact technical terms.
+## Core capabilities
 
-- Data leakage risk: cloud-first workflows compromise privacy and IP.
+### Epistemic audit
 
-### **What This Solves**
+Each response is returned as a structured research object, not a raw string. The engine produces:
 
-Sovereign Research Engine upgrades RAG into a true research workbench:
+- A grounded answer
+- A belief report
+- An epistemic score
+- Evidence quality notes
+- Hallucination risk notes
+- Citations tied to source material
 
-**Epistemic Transparency**
-Every answer includes a structured Belief Report (self-audit) and citations.
+### Crystallized knowledge
 
-**Crystallization (Lab Notebook)**
-Verified answers become permanent knowledge artifacts in PostgreSQL and are reused in future queries (recursive grounding).
+Verified answers are stored in PostgreSQL as durable research artifacts. Future queries can prioritize this verified knowledge over raw document chunks, creating a recursive knowledge loop without fine-tuning.
 
-**Hybrid Retrieval**
-Dense vector search plus BM25 keyword retrieval plus optional multi-query expansion for higher recall on technical material.
+### Hybrid retrieval
 
-**Local Vault and Document Library**
-Ingested documents are persisted in a stable location and indexed in PostgreSQL. A Library view shows what is stored (including previews), even if the raw PDFs are later moved or deleted.
+The engine supports two retrieval modes:
 
-### **System Architecture**
+- `precision`: vector retrieval plus BM25-style keyword retrieval for sharper technical lookup
+- `exploratory`: multi-query expansion for broader conceptual recall
 
-The system is split into three sovereign layers:
+### Persistent document library
 
-1) The Engine (Python and FastAPI)
-Role: Stateless reasoning and orchestration
+Ingested PDFs are chunked, embedded, indexed, and surfaced in a library view with metadata and previews, even when the original raw file is no longer available.
 
-### **Components:**
+## Architecture
 
-**Orchestration:** LangChain (LCEL) for deterministic pipelines
+### 1. Engine
 
-**Inference:** llama-cpp-python for local GGUF models (Qwen, Llama, etc.)
+The Python engine is responsible for ingestion, retrieval, orchestration, and structured generation.
 
-**API:** FastAPI exposed only on local loopback (127.0.0.1)
+- FastAPI exposes the API
+- LangChain LCEL wires the retrieval and generation graph
+- `llama-cpp-python` runs local GGUF models
 
-Core endpoints (local-only):
+Key endpoints:
 
-POST /ingest — upload and index a PDF
+- `POST /ingest`
+- `POST /query`
+- `POST /verify`
+- `GET /notebook/{session_id}`
+- `GET /models`
+- `GET /library`
 
-POST /query — run a research query (returns Belief Report plus citations)
+### 2. Vault
 
-POST /verify — crystallize an answer
+PostgreSQL with pgvector acts as the system of record for:
 
-GET /notebook/{session_id} — retrieve lab notebook entries
+- vector embeddings
+- chunk metadata
+- research notebook entries
+- chat history
 
-GET /models — available GGUF models
+### 3. Workbench
 
-GET /library — document library (previews plus availability status)
+The Streamlit UI provides a browser-based local workbench for:
 
-2) The Vault (PostgreSQL and pgvector)
-Role: Persistent memory and source of truth
+- querying the knowledge base
+- uploading evidence
+- reviewing notebook entries
+- browsing the library
+- selecting models and retrieval modes
 
-#### **Stores:**
+## Repository layout
 
-Vector embeddings (BGE-Small, 384 dims)
+```text
+.
+|-- app/
+|   |-- api.py
+|   |-- core/
+|   |-- database/
+|   `-- utils/
+|-- ui/
+|   |-- streamlit_app.py
+|   |-- ui_utils.py
+|   `-- pages/
+|-- data/
+|-- models/
+|-- scripts/
+|-- docker-compose.yml
+`-- requirements.txt
+```
 
-Chunk metadata (source, page numbers, identifiers)
+## Quick start
 
-Research notebook entries (research_entries)
+### Prerequisites
 
-Chat history (optional)
+- Python 3.10+
+- PostgreSQL 15+ with `pgvector`
+- one or more GGUF models in `models/llms/`
+- a local embedding model path configured in `.env`
 
-3) The UI Layer (Streamlit Workbench)
-Role: Rapid research interface in the browser (local-only)
+### Environment
 
-Calls FastAPI endpoints directly
+Create a `.env` file in the project root:
 
-Provides Workbench, Ingest, Notebook, Settings, and Library pages
-
-**Key Capabilities**
-
-Epistemic Audit Layer
-The engine outputs structured objects, not raw strings. Each response contains:
-
-Answer
-
-Belief Report
-
-epistemic score (0.0–1.0)
-
-evidence quality
-
-hallucination risk
-
-reasoning trace (audit narrative)
-
-Citations with source and page references
-
-Hybrid Retrieval Modes
-
-Precision Mode: Vector and BM25 weighted ensemble (best for exact technical retrieval)
-
-Exploratory Mode: Multi-query expansion for broader conceptual coverage
-
-Recursive Grounding
-Verified knowledge is saved into research_entries and prioritized in future responses. This creates a knowledge feedback loop without model fine-tuning.
-
-Persistent Local Document Library
-
-PDFs are saved to a stable user data directory (per OS) during ingestion.
-
-The Vault stores enough context (metadata plus previews) to display a library even if raw files are deleted.
-
-Repository Structure
-sovereign-research-engine/
-├── app/                        # Python Engine (FastAPI + RAG)
-│   ├── core/                   # Ingest, model management, rag chain
-│   ├── database/               # PGVector + schema + notebook CRUD
-│   └── api.py                  # FastAPI endpoints
-├── ui/                         # Streamlit Workbench UI (calls FastAPI)
-│   ├── streamlit_app.py
-│   ├── ui_utils.py
-│   └── pages/
-├── data/                       # Raw evidence (dev only; desktop uses user dir)
-├── models/                     # GGUF + embedding models
-├── scripts/                    # DB reset, utilities
-├── .env
-├── requirements.txt
-└── README.md
-
-**Installation and Setup**
-
-Prerequisites
-
-Python 3.10+
-
-PostgreSQL 15+ with pgvector
-
-GGUF model(s) in models/llms/
-
-Embedding model path set in .env
-
-Configure Environment
-Create .env in repo root:
-
+```env
 DATABASE_URL=postgresql://user:pass@localhost:5432/yourdb
+DEFAULT_LLM_MODEL=your-model.gguf
 EMBEDDING_MODEL_PATH=./models/embeddings/...
 LLM_MODELS_DIR=./models/llms
-MODEL_PATH=./models/llms/qwen2.5-coder-1.5b-instruct-q4_k_m.gguf
 POSTGRES_VECTOR_DIM=384
 CHUNK_SIZE=1000
 CHUNK_OVERLAP=100
+```
 
+### Database
 
-Initialize Database
-Run the schema:
+Initialize the schema:
 
+```bash
 psql -d yourdb -f app/database/schema.sql
+```
 
-Run (Development)
+### Run the backend
 
-Start FastAPI Engine
-
+```bash
 uvicorn app.api:app --host 127.0.0.1 --port 8000 --reload
+```
 
+### Run the workbench
 
-Start Streamlit Workbench UI
-
+```bash
 streamlit run ui/streamlit_app.py
+```
 
-**Usage Workflow**
+## Workflow
 
-Ingestion
-Upload PDF research papers via the Ingest page. The system performs hashing to prevent duplicate indexing.
+1. Ingest PDFs into the vault.
+2. Ask research questions in the workbench.
+3. Inspect the belief report and citations.
+4. Verify strong answers into the notebook.
+5. Reuse verified knowledge in later sessions.
 
-Querying
-Select a mode (Precision vs Exploratory) and submit your query via the Workbench.
+## Design principles
 
-Review
-Examine the Belief Report attached to the answer and check citations.
+- Local-first by default
+- Database-first persistence
+- Auditable outputs over opaque fluency
+- Modular separation between UI, engine, and storage
+- Retrieval designed for both semantic and exact-match research
 
-Crystallization
-If the answer is accurate, verify it. This commits the finding to the Lab Notebook, reinforcing the system’s future performance.
+## License
 
-Library
-Browse the Library to see what has been indexed, including previews and whether the original PDF is still present on disk.
-
-**Contribution**
-
-This project adheres to strict architectural standards to maintain sovereignty and modularity.
-
-Stateless Logic
-Ensure all new chains in rag_chain.py remain stateless.
-
-Type Safety
-All API exchanges must be defined via Pydantic models.
-
-Database First
-All state must persist in PostgreSQL; no in-memory session storage for research artifacts.
-
-**License**
-
-Distributed under the Apache License. See LICENSE for more information.
+Distributed under the Apache License. See [LICENSE](LICENSE).
