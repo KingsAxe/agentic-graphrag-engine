@@ -1,0 +1,24 @@
+# Virtual Environments
+RagV2/
+venv/
+.venv/
+env/
+
+# Environment Variables
+.env
+.env.local
+
+# Python Core
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Data & Uploads
+uploads/
+postgres_data/
+qdrant_data/
+neo4j_data/
+
+# OS Files
+.DS_Store
+Thumbs.db
