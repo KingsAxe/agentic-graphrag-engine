@@ -1,6 +1,0 @@
-[theme]
-primaryColor = "#4A4A4A"          # Dark gray for buttons and accents
-backgroundColor = "#FFFFFF"       # Pure white main area
-secondaryBackgroundColor = "#F5F5F5" # Light gray sidebar/widgets
-textColor = "#31333F"             # Soft black for readability
-font = "sans serif"
