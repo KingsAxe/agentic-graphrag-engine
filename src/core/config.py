@@ -10,12 +10,15 @@ class Settings(BaseSettings):
     POSTGRES_USER: str = "sovereign"
     POSTGRES_PASSWORD: str = "password123"
     POSTGRES_DB: str = "sovereign_rag"
-    POSTGRES_PORT: int = 5432
+    POSTGRES_PORT: int = 5433
     
     # Neo4j
     NEO4J_URI: str = "bolt://localhost:7687"
     NEO4J_USER: str = "neo4j"
     NEO4J_PASSWORD: str = "password123"
+    
+    # External APIs
+    OPENAI_API_KEY: str = ""
     
     # Qdrant
     QDRANT_HOST: str = "localhost"

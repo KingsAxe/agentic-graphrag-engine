@@ -5,6 +5,8 @@ from src.services.ingestion.parser import DocumentParser
 from src.services.ingestion.chunker import TextChunker
 from src.services.ingestion.embedder import get_embedder
 from src.services.qdrant_service import QdrantService
+from src.services.graph.extractor import get_graph_extractor
+from src.services.neo4j_service import Neo4jService
 from src.db.postgres import async_session
 from src.models.document import IngestionJob, JobStatus
 from sqlalchemy import update
@@ -29,15 +31,27 @@ async def _process_document_async(job_id: str, document_id: str, workspace_id: s
         logger.info(f"Chunking document {document_id}")
         chunks = TextChunker.chunk_text(text)
         
-        # 4. Embed Chunks
+        # 4. Embed Chunks & Vector Store
         logger.info(f"Embedding {len(chunks)} chunks for document {document_id}")
         embedder = get_embedder()
         embeddings = embedder.embed_texts(chunks)
         
-        # 5. Store in Qdrant
         logger.info(f"Upserting embeddings to Qdrant")
         await QdrantService.init_collection()
         await QdrantService.upsert_chunks(workspace_id, document_id, chunks, embeddings)
+
+        # 5. Graph Extraction (Neo4j)
+        logger.info(f"Commencing LLM Graph Extraction for {len(chunks)} chunks")
+        extractor = get_graph_extractor()
+        for i, chunk in enumerate(chunks):
+            # 5a. Merge the chunk node in Neo4j
+            await Neo4jService.merge_chunk(workspace_id, document_id, i, chunk)
+            
+            # 5b. Extract Entities, Relations, Claims via LLM
+            extraction = extractor.extract_from_text(chunk)
+            
+            # 5c. Inject into Graph
+            await Neo4jService.insert_extraction(workspace_id, document_id, i, extraction)
         
         # 6. Mark Completion
         async with async_session() as session:
@@ -67,5 +81,4 @@ async def _process_document_async(job_id: str, document_id: str, workspace_id: s
 @celery_app.task(name="process_document_task")
 def process_document_task(job_id: str, document_id: str, workspace_id: str, file_path: str, mime_type: str):
     """Celery task wrapper around the async ingestion pipeline."""
-    # Celery workers execute synchronous Python, so we use asyncio.run 
     asyncio.run(_process_document_async(job_id, document_id, workspace_id, file_path, mime_type))
