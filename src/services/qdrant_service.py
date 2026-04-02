@@ -1,4 +1,4 @@
-from qdrant_client.models import VectorParams, Distance, PointStruct
+from qdrant_client.models import VectorParams, Distance, PointStruct, Filter, FieldCondition, MatchValue
 from src.db.qdrant_client import qdrant_client
 import uuid
 
@@ -41,3 +41,21 @@ class QdrantService:
             collection_name=QdrantService.COLLECTION_NAME,
             points=points
         )
+
+    @staticmethod
+    async def search_chunks(workspace_id: str, query_vector: list[float], limit: int = 5):
+        """Search for similar chunks within a specific workspace."""
+        search_result = await qdrant_client.search(
+            collection_name=QdrantService.COLLECTION_NAME,
+            query_vector=query_vector,
+            query_filter=Filter(
+                must=[
+                    FieldCondition(
+                        key="workspace_id",
+                        match=MatchValue(value=str(workspace_id)),
+                    )
+                ]
+            ),
+            limit=limit,
+        )
+        return [{"text": hit.payload["text"], "score": hit.score} for hit in search_result]

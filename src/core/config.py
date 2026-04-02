@@ -18,7 +18,8 @@ class Settings(BaseSettings):
     NEO4J_PASSWORD: str = "password123"
     
     # External APIs
-    OPENAI_API_KEY: str = ""
+    GROQ_API_KEY: str = ""
+    LLM_MODEL: str = "llama3-70b-8192"
     
     # Qdrant
     QDRANT_HOST: str = "localhost"

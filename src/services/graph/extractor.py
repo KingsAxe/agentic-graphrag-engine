@@ -1,5 +1,5 @@
 import logging
-from openai import OpenAI
+from langchain_groq import ChatGroq
 from src.core.config import settings
 from src.models.graph import GraphExtraction
 
@@ -7,15 +7,21 @@ logger = logging.getLogger(__name__)
 
 class GraphExtractorService:
     def __init__(self):
-        if settings.OPENAI_API_KEY:
-            self.client = OpenAI(api_key=settings.OPENAI_API_KEY)
+        if settings.GROQ_API_KEY:
+            self.llm = ChatGroq(
+                groq_api_key=settings.GROQ_API_KEY,
+                model_name=settings.LLM_MODEL,
+                temperature=0
+            )
+            # Use LangChain structured output
+            self.extractor = self.llm.with_structured_output(GraphExtraction)
         else:
-            self.client = None
-            logger.warning("OPENAI_API_KEY not set. Graph extraction will fail.")
+            self.extractor = None
+            logger.warning("GROQ_API_KEY not set. Graph extraction will fail.")
 
     def extract_from_text(self, text: str) -> GraphExtraction:
-        if not self.client:
-            logger.error("Skipping extraction: No OpenAI client initialized (missing OPENAI_API_KEY).")
+        if not self.extractor:
+            logger.error("Skipping extraction: No Groq client initialized (missing GROQ_API_KEY).")
             return GraphExtraction()
 
         prompt = f"""
@@ -29,20 +35,10 @@ class GraphExtractorService:
         """
 
         try:
-            response = self.client.beta.chat.completions.parse(
-                model="gpt-4o-mini",
-                messages=[
-                    {"role": "system", "content": "You are an analytical data extraction engine. You strictly output factual, structural data."},
-                    {"role": "user", "content": prompt}
-                ],
-                response_format=GraphExtraction,
-                temperature=0.0
-            )
-
-            extraction = response.choices[0].message.parsed
+            extraction = self.extractor.invoke(prompt)
             return extraction
         except Exception as e:
-            logger.error(f"LLM Extraction failed: {e}")
+            logger.error(f"Groq Extraction failed: {e}")
             return GraphExtraction()
 
 # Singleton

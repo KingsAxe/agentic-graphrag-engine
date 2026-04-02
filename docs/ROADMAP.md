@@ -21,14 +21,14 @@ This document outlines the weekly cadence for building, testing, and deploying S
 ### Week 3: Graph Construction
 **Goal:** Enable entity extraction and graph storage.
 *   Define Neo4j node and relationship schemas.
-*   Implement LLM prompts for extracting entities, relationships, and claims from chunks.
+*   Implement LLM prompts for extracting entities, relationships, and claims from chunks (Llama 3 via Groq).
 *   Create Graph Service methods to write extracted data to Neo4j.
 *   Update Celery pipeline to store graph data alongside vector embeddings.
 
 ## Phase 2: Intelligence Layer (Weeks 4-5)
 
-### Week 4: Agent Orchestration and Hybrid Retrieval
-**Goal:** Enable reasoning over the ingested data.
+### Week 4: Agent Orchestration and Hybrid Retrieval (COMPLETED)
+**Goal:** Enable reasoning over the ingested data using Llama 3 (via Groq).
 *   Implement the Retrieval Service (routing queries to Qdrant, querying Neo4j).
 *   Setup LangGraph scaffolding for the Agent Service.
 *   Implement basic agent tools: `search_vector`, `query_graph`, `expand_entity`.

@@ -76,3 +76,36 @@ class Neo4jService:
                     workspace_id=workspace_id,
                     claim_text=claim.claim
                 )
+
+    @staticmethod
+    async def query_graph(workspace_id: str, query_text: str):
+        """Search for entities matching a text query within a workspace."""
+        query = """
+        MATCH (e:Entity {workspace_id: $workspace_id})
+        WHERE e.id CONTAINS $query OR e.description CONTAINS $query
+        RETURN e.id as id, e.type as type, e.description as description
+        LIMIT 10
+        """
+        async with neo4j_driver.session() as session:
+            result = await session.run(query, workspace_id=workspace_id, query=query_text.upper())
+            return [record.data() for record in await result.data()]
+
+    @staticmethod
+    async def expand_entity(workspace_id: str, entity_id: str):
+        """Retrieve all relationships and claims for a specific entity."""
+        rel_query = """
+        MATCH (source:Entity {id: $ent_id, workspace_id: $workspace_id})-[r]->(target:Entity {workspace_id: $workspace_id})
+        RETURN source.id as source, type(r) as relation, target.id as target, r.description as description
+        """
+        claim_query = """
+        MATCH (e:Entity {id: $ent_id, workspace_id: $workspace_id})-[:HAS_CLAIM]->(claim:Claim)
+        RETURN claim.text as claim
+        """
+        async with neo4j_driver.session() as session:
+            rel_result = await session.run(rel_query, ent_id=entity_id.upper(), workspace_id=workspace_id)
+            claim_result = await session.run(claim_query, ent_id=entity_id.upper(), workspace_id=workspace_id)
+            
+            return {
+                "relationships": [record.data() for record in await rel_result.data()],
+                "claims": [record.data() for record in await claim_result.data()]
+            }
