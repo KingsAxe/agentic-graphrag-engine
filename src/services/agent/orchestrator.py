@@ -14,42 +14,43 @@ class AgentState(TypedDict):
 tools = [search_vector_tool, query_graph_tool, expand_entity_tool]
 tool_node = ToolNode(tools)
 
-model = ChatGroq(
-    groq_api_key=settings.GROQ_API_KEY,
-    model_name=settings.LLM_MODEL,
-    temperature=0
-)
-model_with_tools = model.bind_tools(tools)
+def get_app():
+    if not settings.GROQ_API_KEY:
+        return None
 
-def call_model(state: AgentState):
-    # Inject workspace_id into the prompt context if needed, 
-    # but tools already expect it.
-    last_message = state['messages'][-1]
-    # Simple strategy: just pass the messages. 
-    # The agent must know to pass its own state's workspace_id to the tools.
-    response = model_with_tools.invoke(state['messages'])
-    return {"messages": [response]}
+    model = ChatGroq(
+        groq_api_key=settings.GROQ_API_KEY,
+        model_name=settings.LLM_MODEL,
+        temperature=0
+    )
+    model_with_tools = model.bind_tools(tools)
 
-def should_continue(state: AgentState):
-    messages = state['messages']
-    last_message = messages[-1]
-    if last_message.tool_calls:
-        return "tools"
-    return END
+    def call_model(state: AgentState):
+        response = model_with_tools.invoke(state['messages'])
+        return {"messages": [response]}
 
-# Define the graph
-workflow = StateGraph(AgentState)
+    def should_continue(state: AgentState):
+        messages = state['messages']
+        last_message = messages[-1]
+        if last_message.tool_calls:
+            return "tools"
+        return END
 
-workflow.add_node("agent", call_model)
-workflow.add_node("tools", tool_node)
+    workflow = StateGraph(AgentState)
+    workflow.add_node("agent", call_model)
+    workflow.add_node("tools", tool_node)
+    workflow.set_entry_point("agent")
+    workflow.add_conditional_edges("agent", should_continue)
+    workflow.add_edge("tools", "agent")
 
-workflow.set_entry_point("agent")
-workflow.add_conditional_edges("agent", should_continue)
-workflow.add_edge("tools", "agent")
+    return workflow.compile()
 
-app = workflow.compile()
+app = get_app()
 
 async def run_agent(query: str, workspace_id: str):
+    if not app:
+        raise ValueError("Cannot run agent: GROQ_API_KEY is not set.")
+    
     # Initial state
     inputs = {
         "messages": [HumanMessage(content=f"User Query: {query}\n(Internal context: workspace_id={workspace_id})")],
