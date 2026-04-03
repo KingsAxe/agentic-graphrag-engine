@@ -2,6 +2,7 @@ from langchain_core.tools import tool
 from src.services.qdrant_service import QdrantService
 from src.services.neo4j_service import Neo4jService
 from src.services.ingestion.embedder import get_embedder
+from src.services.validation.engine import get_validation_engine
 import asyncio
 
 @tool
@@ -10,8 +11,6 @@ def search_vector_tool(query: str, workspace_id: str):
     Use this for general factual questions and broad context."""
     embedder = get_embedder()
     query_vector = embedder.embed_texts([query])[0]
-    # Tool must be synchronous for basic LangGraph integration unless wrapped
-    # Using asyncio.run as a shortcut for this internal tool calling
     results = asyncio.run(QdrantService.search_chunks(workspace_id, query_vector))
     return results
 
@@ -25,6 +24,17 @@ def query_graph_tool(query_text: str, workspace_id: str):
 @tool
 def expand_entity_tool(entity_id: str, workspace_id: str):
     """Retrieve all relationships and detailed claims for a specific entity ID.
-    Use this to perform deep-dives into an entity's connections and stated facts."""
-    results = asyncio.run(Neo4jService.expand_entity(workspace_id, entity_id))
-    return results
+    This tool also performs a validation check on the claims to detect contradictions 
+    and compute a confidence score. Use this for deep-dives into an entity."""
+    
+    async def _run():
+        results = await Neo4jService.expand_entity(workspace_id, entity_id)
+        
+        # Run Validation on claims
+        engine = get_validation_engine()
+        validation = await engine.validate_claims(results.get("claims", []))
+        
+        results["validation"] = validation
+        return results
+
+    return asyncio.run(_run())

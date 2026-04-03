@@ -92,14 +92,15 @@ class Neo4jService:
 
     @staticmethod
     async def expand_entity(workspace_id: str, entity_id: str):
-        """Retrieve all relationships and claims for a specific entity."""
+        """Retrieve all relationships and claims for a specific entity with metadata."""
         rel_query = """
         MATCH (source:Entity {id: $ent_id, workspace_id: $workspace_id})-[r]->(target:Entity {workspace_id: $workspace_id})
         RETURN source.id as source, type(r) as relation, target.id as target, r.description as description
         """
         claim_query = """
         MATCH (e:Entity {id: $ent_id, workspace_id: $workspace_id})-[:HAS_CLAIM]->(claim:Claim)
-        RETURN claim.text as claim
+        MATCH (c:Chunk)-[:SUPPORTS]->(claim)
+        RETURN claim.text as claim, count(c) as support_count, collect(DISTINCT c.document_id) as document_ids
         """
         async with neo4j_driver.session() as session:
             rel_result = await session.run(rel_query, ent_id=entity_id.upper(), workspace_id=workspace_id)
