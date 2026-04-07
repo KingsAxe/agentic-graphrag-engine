@@ -138,7 +138,7 @@ async def list_models():
 
 
 @app.post("/ingest")
-async def ingest_document(file: UploadFile = File(...)):
+def ingest_document(file: UploadFile = File(...)):
     """Handles PDF ingestion and vectorization."""
     try:
         os.makedirs(os.path.join("data", "raw"), exist_ok=True)
@@ -206,10 +206,13 @@ async def research_query(request: QueryRequest):
 
         # 6) Persist Chat History
         history_manager.add_user_message(request.input_text)
-        history_manager.add_ai_message(response.answer)
-
-        # pydantic v2: prefer model_dump(); v1: dict()
-        data = response.model_dump() if hasattr(response, "model_dump") else response.dict()
+        
+        if isinstance(response, dict):
+            history_manager.add_ai_message(response.get("answer", ""))
+            data = response
+        else:
+            history_manager.add_ai_message(response.answer)
+            data = response.model_dump() if hasattr(response, "model_dump") else response.dict()
 
         return {"entry_id": entry_id, "data": data}
 

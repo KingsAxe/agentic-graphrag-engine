@@ -115,9 +115,10 @@ class RAGEngine:
             "Use the following document chunks to support your answer:\n"
             "{context}\n\n"
             "INSTRUCTIONS:\n"
-            "1. If Verified Knowledge conflicts with Raw PDF Context, prioritize Verified Knowledge.\n"
-            "2. If neither contains the answer, admit it in the Belief Report.\n"
-            "3. Cite specific sources and page numbers.\n"
+            "1. Synthesize a direct answer to the user's input.\n"
+            "2. If Verified Knowledge conflicts with Raw PDF Context, prioritize Verified Knowledge.\n"
+            "3. If neither contains the answer, set the 'answer' field to indicate insufficient context, and explain why in the 'reasoning_process' field.\n"
+            "4. Cite specific sources and page numbers. If none, leave citations empty.\n"
         )
 
         prompt = ChatPromptTemplate.from_messages([
