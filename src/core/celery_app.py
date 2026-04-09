@@ -1,5 +1,10 @@
+import logging
 from celery import Celery
 from src.core.config import settings
+from src.core.logging import setup_logging
+
+setup_logging()
+logger = logging.getLogger(__name__)
 
 celery_app = Celery(
     "sovereign_tasks",
@@ -14,4 +19,10 @@ celery_app.conf.update(
     result_serializer="json",
     timezone="UTC",
     enable_utc=True,
+)
+
+logger.info(
+    "Configured Celery broker for redis://%s:%s/0",
+    settings.REDIS_HOST,
+    settings.REDIS_PORT,
 )

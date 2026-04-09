@@ -80,14 +80,18 @@ class Neo4jService:
     @staticmethod
     async def query_graph(workspace_id: str, query_text: str):
         """Search for entities matching a text query within a workspace."""
-        query = """
+        cypher = """
         MATCH (e:Entity {workspace_id: $workspace_id})
-        WHERE e.id CONTAINS $query OR e.description CONTAINS $query
+        WHERE e.id CONTAINS $search_text OR e.description CONTAINS $search_text
         RETURN e.id as id, e.type as type, e.description as description
         LIMIT 10
         """
         async with neo4j_driver.session() as session:
-            result = await session.run(query, workspace_id=workspace_id, query=query_text.upper())
+            result = await session.run(
+                cypher,
+                workspace_id=workspace_id,
+                search_text=query_text.upper(),
+            )
             return [record.data() for record in await result.data()]
 
     @staticmethod
@@ -110,3 +114,17 @@ class Neo4jService:
                 "relationships": [record.data() for record in await rel_result.data()],
                 "claims": [record.data() for record in await claim_result.data()]
             }
+
+    @staticmethod
+    async def delete_workspace_graph(workspace_id: str):
+        query = """
+        MATCH (n {workspace_id: $workspace_id})
+        OPTIONAL MATCH (n)-[]-(claim:Claim)
+        WITH collect(DISTINCT n) + collect(DISTINCT claim) AS nodes
+        UNWIND nodes AS node
+        WITH DISTINCT node
+        WHERE node IS NOT NULL
+        DETACH DELETE node
+        """
+        async with neo4j_driver.session() as session:
+            await session.run(query, workspace_id=workspace_id)

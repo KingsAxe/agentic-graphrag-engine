@@ -46,7 +46,8 @@ async def test_validation():
         print(f"Reason: {c['explanation']}")
 
 if __name__ == "__main__":
-    if not os.getenv("GROQ_API_KEY"):
-        print("Error: GROQ_API_KEY must be set to run this test.")
+    provider = os.getenv("LLM_PROVIDER", "ollama").lower()
+    if provider == "groq" and not os.getenv("GROQ_API_KEY"):
+        print("Error: GROQ_API_KEY must be set when LLM_PROVIDER=groq.")
     else:
         asyncio.run(test_validation())

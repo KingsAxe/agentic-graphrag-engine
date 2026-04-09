@@ -1,3 +1,4 @@
+import logging
 from fastapi import Security, HTTPException, status, Depends
 from fastapi.security import APIKeyHeader
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -7,12 +8,14 @@ from src.models.workspace import Workspace
 
 API_KEY_NAME = "Authorization"
 api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=True)
+logger = logging.getLogger(__name__)
 
 async def get_current_workspace(
     api_key: str = Security(api_key_header),
     db: AsyncSession = Depends(get_db)  
 ):
     if not api_key.startswith("Bearer "):
+        logger.warning("Rejected auth request with malformed authorization header")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid authentication credentials",
@@ -25,8 +28,10 @@ async def get_current_workspace(
     workspace = result.scalars().first()
     
     if not workspace or not workspace.is_active:
+        logger.warning("Rejected auth request for inactive or unknown API key")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or inactive API Key",
         )
+    logger.info("Authenticated workspace %s", workspace.id)
     return workspace

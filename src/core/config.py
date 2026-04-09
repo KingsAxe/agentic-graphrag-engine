@@ -18,8 +18,11 @@ class Settings(BaseSettings):
     NEO4J_PASSWORD: str = "password123"
     
     # External APIs
+    LLM_PROVIDER: str = "mock"
+    LLM_BASE_URL: str = "http://localhost:11434/v1"
+    LLM_API_KEY: str = "ollama"
     GROQ_API_KEY: str = ""
-    LLM_MODEL: str = "llama3-70b-8192"
+    LLM_MODEL: str = "qwen2.5:0.5b-instruct"
     
     # Qdrant
     QDRANT_HOST: str = "localhost"
@@ -29,10 +32,18 @@ class Settings(BaseSettings):
     REDIS_HOST: str = "localhost"
     REDIS_PORT: int = 6379
 
+    # Logging
+    LOG_LEVEL: str = "INFO"
+    FRONTEND_ORIGINS: str = "http://localhost:3000,http://127.0.0.1:3000"
+
     model_config = SettingsConfigDict(env_file=".env", case_sensitive=True)
 
     @property
     def SQLALCHEMY_DATABASE_URI(self) -> str:
         return f"postgresql+asyncpg://{self.POSTGRES_USER}:{quote_plus(self.POSTGRES_PASSWORD)}@{self.POSTGRES_SERVER}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
+
+    @property
+    def CORS_ORIGINS(self) -> list[str]:
+        return [origin.strip() for origin in self.FRONTEND_ORIGINS.split(",") if origin.strip()]
 
 settings = Settings()

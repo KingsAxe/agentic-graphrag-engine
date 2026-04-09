@@ -1,8 +1,9 @@
 import logging
 from typing import List, Dict, Any
-from langchain_groq import ChatGroq
 from pydantic import BaseModel, Field
 from src.core.config import settings
+from src.services.llm.factory import build_chat_llm, get_llm_display_name, llm_is_configured
+from src.services.llm.mock import detect_contradiction
 
 logger = logging.getLogger(__name__)
 
@@ -13,20 +14,32 @@ class ValidationResult(BaseModel):
 
 class ValidationEngine:
     def __init__(self):
-        if settings.GROQ_API_KEY:
-            self.llm = ChatGroq(
-                groq_api_key=settings.GROQ_API_KEY,
-                model_name=settings.LLM_MODEL,
-                temperature=0
-            )
+        self.use_mock = settings.LLM_PROVIDER.lower() == "mock"
+
+        if self.use_mock:
+            self.judge = None
+            logger.info("Initializing validation engine in mock mode")
+            return
+
+        if llm_is_configured():
+            logger.info("Initializing validation engine with %s", get_llm_display_name())
+            self.llm = build_chat_llm(temperature=0)
             # Use LangChain structured output for the judge
             self.judge = self.llm.with_structured_output(ValidationResult)
         else:
             self.judge = None
-            logger.warning("GROQ_API_KEY not set. ValidationEngine will be disabled.")
+            logger.warning("LLM is not configured. Validation engine will be disabled.")
 
     async def detect_contradiction(self, claim_a: str, claim_b: str) -> ValidationResult:
         """Compare two claims and return a ValidationResult."""
+        if self.use_mock:
+            is_contradictory, explanation, confidence = detect_contradiction(claim_a, claim_b)
+            return ValidationResult(
+                is_contradictory=is_contradictory,
+                explanation=explanation,
+                confidence_score=confidence,
+            )
+
         if not self.judge:
             return ValidationResult(is_contradictory=False, explanation="Judge not initialized.", confidence_score=0.5)
 
@@ -41,10 +54,11 @@ class ValidationEngine:
         """
 
         try:
+            logger.info("Submitting validation request via configured LLM provider")
             result = await self.judge.ainvoke(prompt)
             return result
         except Exception as e:
-            logger.error(f"Validation LLM call failed: {e}")
+            logger.exception("Validation LLM call failed")
             return ValidationResult(is_contradictory=False, explanation=f"Error: {e}", confidence_score=0.5)
 
     async def validate_claims(self, claims: List[Dict[str, Any]]) -> Dict[str, Any]:

@@ -36,6 +36,31 @@ Based on system architecture decisions (ADRs):
 
 *   [Decisions & ADRs](./docs/decisions/)
 *   [Weekly Roadmap](./docs/ROADMAP.md)
+*   [Local Development Runbook](./docs/local-dev.md)
+*   [Launch Commands](./docs/launch-commands.md)
+
+## Launch Readiness
+
+Copy `example.env` to `.env` before testing query or graph-extraction features. Local development now defaults to `LLM_PROVIDER=mock`, which avoids model downloads and keeps the ingestion, graph, worker, and query pipeline usable while you build. If you later want Ollama or Groq again, switch `LLM_PROVIDER` and set the matching config values.
+
+Use `LOG_LEVEL=INFO` for normal startup and `LOG_LEVEL=DEBUG` when tracing launch issues.
+
+For local constrained-network testing:
+
+*   Keep `LLM_PROVIDER=mock` in `.env`.
+*   The project will use mock embeddings, mock graph extraction, mock validation, and a mock query agent.
+*   This mode is for wiring and iteration, not model-quality evaluation.
+
+The API emits a startup readiness log and the root `GET /` endpoint returns a non-secret readiness summary showing whether the configured LLM provider and the core service endpoints are set.
+
+## Frontend
+
+A full Next.js frontend now lives in [frontend](./frontend). It includes:
+
+* workspace-scoped upload and reset actions
+* recent document and job tracking
+* streamed reasoning traces from the query API
+* a persistent query console for iterative testing
 
 ## Success Criteria
 

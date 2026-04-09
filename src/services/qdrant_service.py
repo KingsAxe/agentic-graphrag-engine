@@ -59,3 +59,22 @@ class QdrantService:
             limit=limit,
         )
         return [{"text": hit.payload["text"], "score": hit.score} for hit in search_result]
+
+    @staticmethod
+    async def delete_workspace_chunks(workspace_id: str):
+        exists = await qdrant_client.collection_exists(QdrantService.COLLECTION_NAME)
+        if not exists:
+            return
+
+        await qdrant_client.delete(
+            collection_name=QdrantService.COLLECTION_NAME,
+            points_selector=Filter(
+                must=[
+                    FieldCondition(
+                        key="workspace_id",
+                        match=MatchValue(value=str(workspace_id)),
+                    )
+                ]
+            ),
+            wait=True,
+        )

@@ -4,6 +4,11 @@ venv/
 .venv/
 env/
 
+# Frontend
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+
 # Environment Variables
 .env
 .env.local
@@ -15,6 +20,7 @@ __pycache__/
 
 # Data & Uploads
 uploads/
+logs/
 postgres_data/
 qdrant_data/
 neo4j_data/

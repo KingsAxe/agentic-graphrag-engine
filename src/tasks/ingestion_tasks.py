@@ -1,6 +1,8 @@
 import logging
 import asyncio
+from neo4j.exceptions import ServiceUnavailable
 from src.core.celery_app import celery_app
+from src.core.config import settings
 from src.services.ingestion.parser import DocumentParser
 from src.services.ingestion.chunker import TextChunker
 from src.services.ingestion.embedder import get_embedder
@@ -16,6 +18,7 @@ logger = logging.getLogger(__name__)
 
 async def _process_document_async(job_id: str, document_id: str, workspace_id: str, file_path: str, mime_type: str):
     try:
+        logger.info("Starting ingestion job %s for document %s in workspace %s", job_id, document_id, workspace_id)
         # 1. Update Job Status to Processing
         async with async_session() as session:
             await session.execute(
@@ -44,14 +47,24 @@ async def _process_document_async(job_id: str, document_id: str, workspace_id: s
         logger.info(f"Commencing LLM Graph Extraction for {len(chunks)} chunks")
         extractor = get_graph_extractor()
         for i, chunk in enumerate(chunks):
-            # 5a. Merge the chunk node in Neo4j
-            await Neo4jService.merge_chunk(workspace_id, document_id, i, chunk)
-            
-            # 5b. Extract Entities, Relations, Claims via LLM
-            extraction = extractor.extract_from_text(chunk)
-            
-            # 5c. Inject into Graph
-            await Neo4jService.insert_extraction(workspace_id, document_id, i, extraction)
+            logger.info("Processing extraction for chunk %s of %s", i + 1, len(chunks))
+            try:
+                # 5a. Merge the chunk node in Neo4j
+                await Neo4jService.merge_chunk(workspace_id, document_id, i, chunk)
+                
+                # 5b. Extract Entities, Relations, Claims via LLM
+                extraction = extractor.extract_from_text(chunk)
+                
+                # 5c. Inject into Graph
+                await Neo4jService.insert_extraction(workspace_id, document_id, i, extraction)
+            except ServiceUnavailable:
+                if settings.LLM_PROVIDER.lower() == "mock":
+                    logger.warning(
+                        "Neo4j is unavailable. Skipping graph writes for chunk %s in mock mode.",
+                        i + 1,
+                    )
+                    continue
+                raise
         
         # 6. Mark Completion
         async with async_session() as session:
@@ -66,7 +79,7 @@ async def _process_document_async(job_id: str, document_id: str, workspace_id: s
         logger.info(f"Job {job_id} completed successfully.")
 
     except Exception as e:
-        logger.error(f"Job {job_id} failed: {e}")
+        logger.exception("Job %s failed", job_id)
         async with async_session() as session:
             await session.execute(
                 update(IngestionJob).where(IngestionJob.id == job_id).values(
