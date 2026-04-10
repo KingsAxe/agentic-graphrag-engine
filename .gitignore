@@ -28,3 +28,4 @@ neo4j_data/
 # OS Files
 .DS_Store
 Thumbs.db
+recover-v2.ps1
