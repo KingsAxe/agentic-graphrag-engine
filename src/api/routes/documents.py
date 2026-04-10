@@ -1,10 +1,11 @@
 import logging
 import os
 import aiofiles
+from uuid import UUID
 from fastapi import APIRouter, UploadFile, File, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy import delete, desc
+from sqlalchemy import delete, desc, func, select as sa_select
 from neo4j.exceptions import ServiceUnavailable
 from src.api.auth import get_current_workspace
 from src.models.workspace import Workspace
@@ -17,9 +18,50 @@ from src.core.config import settings
 
 router = APIRouter(prefix="/documents", tags=["Documents"])
 logger = logging.getLogger(__name__)
+JOB_NOT_FOUND_DETAIL = "Job not found in the authenticated workspace."
+DUPLICATE_UPLOAD_DETAIL = (
+    "A document with this filename already exists in the current workspace. "
+    "Reset the workspace or rename the file before uploading again."
+)
+MISSING_UPLOAD_DETAIL = "The original upload is not available for retry in the authenticated workspace."
 
 UPLOAD_DIR = "uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+
+def _job_state_metadata(job: IngestionJob) -> dict:
+    status_value = job.status.value if isinstance(job.status, JobStatus) else str(job.status)
+    action_hint = {
+        JobStatus.PENDING: "The job is queued and waiting for worker pickup.",
+        JobStatus.PROCESSING: "The job is actively being processed by the worker.",
+        JobStatus.COMPLETED: "The job completed successfully. The document is ready for querying.",
+        JobStatus.FAILED: "The job failed. Review the error and use retry if the source file is still available.",
+    }.get(job.status, "Unknown job state.")
+
+    return {
+        "job_id": str(job.id),
+        "status": status_value,
+        "error_message": job.error_message,
+        "created_at": job.created_at,
+        "completed_at": job.completed_at,
+        "is_terminal": job.status in {JobStatus.COMPLETED, JobStatus.FAILED},
+        "can_retry": job.status == JobStatus.FAILED,
+        "action_hint": action_hint,
+    }
+
+
+async def _get_workspace_job(job_id: UUID, workspace: Workspace, db: AsyncSession) -> tuple[IngestionJob, Document]:
+    stmt = (
+        select(IngestionJob, Document)
+        .join(Document, IngestionJob.document_id == Document.id)
+        .where(IngestionJob.id == job_id, Document.workspace_id == workspace.id)
+    )
+    result = await db.execute(stmt)
+    row = result.first()
+    if not row:
+        logger.warning("Workspace %s requested unknown job id %s", workspace.id, job_id)
+        raise HTTPException(status_code=404, detail=JOB_NOT_FOUND_DETAIL)
+    return row
 
 @router.post("/upload")
 async def upload_document(
@@ -45,7 +87,7 @@ async def upload_document(
         )
         raise HTTPException(
             status_code=409,
-            detail="A document with this filename already exists in the current workspace. Reset the workspace or rename the file before uploading again.",
+            detail=DUPLICATE_UPLOAD_DETAIL,
         )
 
     # 1. Save file locally for the worker
@@ -79,28 +121,48 @@ async def upload_document(
 
 @router.get("/{job_id}/status")
 async def get_job_status(
-    job_id: str,
+    job_id: UUID,
     workspace: Workspace = Depends(get_current_workspace),
     db: AsyncSession = Depends(get_db)
 ):
-    stmt = (
-        select(IngestionJob)
-        .join(Document, IngestionJob.document_id == Document.id)
-        .where(IngestionJob.id == job_id, Document.workspace_id == workspace.id)
-    )
-    result = await db.execute(stmt)
-    job = result.scalars().first()
+    job, _document = await _get_workspace_job(job_id, workspace, db)
+    return _job_state_metadata(job)
 
-    if not job:
-        logger.warning("Workspace %s requested unknown job id %s", workspace.id, job_id)
-        raise HTTPException(status_code=404, detail="Job not found")
+
+@router.post("/{job_id}/retry")
+async def retry_job(
+    job_id: UUID,
+    workspace: Workspace = Depends(get_current_workspace),
+    db: AsyncSession = Depends(get_db),
+):
+    job, document = await _get_workspace_job(job_id, workspace, db)
+
+    if job.status not in {JobStatus.FAILED, JobStatus.COMPLETED}:
+        raise HTTPException(status_code=409, detail="Only failed or completed jobs can be retried.")
+
+    file_path = os.path.join(UPLOAD_DIR, f"{workspace.id}_{document.filename}")
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail=MISSING_UPLOAD_DETAIL)
+
+    retry_job = IngestionJob(document_id=document.id, status=JobStatus.PENDING)
+    db.add(retry_job)
+    await db.commit()
+    await db.refresh(retry_job)
+
+    process_document_task.delay(
+        job_id=str(retry_job.id),
+        document_id=str(document.id),
+        workspace_id=str(workspace.id),
+        file_path=file_path,
+        mime_type=document.mime_type,
+    )
+    logger.info("Queued retry job %s for original job %s in workspace %s", retry_job.id, job.id, workspace.id)
 
     return {
-        "job_id": str(job.id),
-        "status": job.status,
-        "error_message": job.error_message,
-        "created_at": job.created_at,
-        "completed_at": job.completed_at
+        "message": "Retry queued.",
+        "workspace_id": str(workspace.id),
+        "source_job_id": str(job.id),
+        "retry_job": _job_state_metadata(retry_job),
     }
 
 
@@ -152,9 +214,23 @@ async def get_recent_documents(
     workspace: Workspace = Depends(get_current_workspace),
     db: AsyncSession = Depends(get_db)
 ):
+    latest_job_per_document = (
+        sa_select(
+            IngestionJob.document_id.label("document_id"),
+            func.max(IngestionJob.created_at).label("latest_created_at"),
+        )
+        .group_by(IngestionJob.document_id)
+        .subquery()
+    )
+
     stmt = (
         select(Document, IngestionJob)
-        .outerjoin(IngestionJob, IngestionJob.document_id == Document.id)
+        .outerjoin(latest_job_per_document, latest_job_per_document.c.document_id == Document.id)
+        .outerjoin(
+            IngestionJob,
+            (IngestionJob.document_id == Document.id)
+            & (IngestionJob.created_at == latest_job_per_document.c.latest_created_at),
+        )
         .where(Document.workspace_id == workspace.id)
         .order_by(desc(Document.created_at))
         .limit(20)
@@ -170,13 +246,7 @@ async def get_recent_documents(
                 "filename": document.filename,
                 "mime_type": document.mime_type,
                 "created_at": document.created_at,
-                "job": None if job is None else {
-                    "job_id": str(job.id),
-                    "status": job.status,
-                    "error_message": job.error_message,
-                    "created_at": job.created_at,
-                    "completed_at": job.completed_at,
-                },
+                "job": None if job is None else _job_state_metadata(job),
             }
         )
 

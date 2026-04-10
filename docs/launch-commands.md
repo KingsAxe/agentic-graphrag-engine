@@ -65,3 +65,12 @@ npm run dev
 ```
 
 The frontend will run on `http://localhost:3000`.
+
+## 8. Run Week 7 verification
+
+After the API, worker, and databases are running:
+
+```powershell
+.\RagV2\Scripts\python.exe tests\verify_week_07.py
+.\RagV2\Scripts\python.exe tests\verify_week_07_workspace_isolation.py
+```

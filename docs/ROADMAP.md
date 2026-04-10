@@ -50,12 +50,12 @@ This document outlines the weekly cadence for building, testing, and deploying S
 *   Build the core chat interface connecting to the API Gateway.
 *   Implement reasoning trace streaming to the UI.
 
-### Week 7: Graph Visualization and UX Polish
-**Goal:** Deliver the flagship interactive experience.
-*   Integrate Cytoscape.js into the Next.js frontend.
-*   Create API endpoints to serve graph elements format (`/graph/entity/{id}`).
-*   Build interactive features: clicking entities to expand connections, viewing exact claim text.
-*   Finalize styling and ensure asynchronous tasks report status visually.
+### Week 7: Workspace Reliability, Retrieval Quality, and Evaluation
+**Goal:** Stabilize the product loop before adding the flagship graph experience.
+*   Add stronger retrieval scoping so queries can be limited to selected documents or recent ingestion targets.
+*   Improve workspace safety by tightening auth-bound workspace access across document, query, and reset flows.
+*   Add better job lifecycle visibility in the frontend, including retry/failure states and clearer progress feedback.
+*   Introduce regression verification for ingestion, scoped retrieval, and trace output so weekly progress is measurable.
 
 ## Phase 4: Scale and Deployment (Week 8)
 

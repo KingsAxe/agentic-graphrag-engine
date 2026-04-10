@@ -17,6 +17,19 @@ class AgentState(TypedDict):
     messages: Annotated[Sequence[BaseMessage], operator.add]
     workspace_id: str
 
+
+def _normalize_document_scope(document_ids: list[str] | None) -> list[str]:
+    return [document_id for document_id in (document_ids or []) if document_id]
+
+
+def _describe_scope(document_ids: list[str] | None) -> str:
+    scoped_document_ids = _normalize_document_scope(document_ids)
+    if not scoped_document_ids:
+        return "workspace-wide retrieval across all documents in the authenticated workspace."
+    if len(scoped_document_ids) == 1:
+        return f"document-scoped retrieval limited to document_id={scoped_document_ids[0]}."
+    return f"document-scoped retrieval limited to {len(scoped_document_ids)} selected documents."
+
 tools = [search_vector_tool, query_graph_tool, expand_entity_tool]
 tool_node = ToolNode(tools)
 logger = logging.getLogger(__name__)
@@ -32,10 +45,12 @@ def _trace_event(step: str, title: str, detail: str, status: str = "completed") 
     }
 
 
-async def run_mock_agent_with_trace(query: str, workspace_id: str):
+async def run_mock_agent_with_trace(query: str, workspace_id: str, document_ids: list[str] | None = None):
     logger.info("Running mock agent workflow for workspace %s", workspace_id)
+    scoped_document_ids = _normalize_document_scope(document_ids)
     trace = [
         _trace_event("receive_query", "Query Received", f"Workspace {workspace_id} submitted: {query}"),
+        _trace_event("retrieval_scope", "Retrieval Scope", _describe_scope(scoped_document_ids)),
     ]
 
     try:
@@ -60,12 +75,16 @@ async def run_mock_agent_with_trace(query: str, workspace_id: str):
         )
 
     query_vector = get_embedder().embed_texts([query])[0]
-    vector_hits = await QdrantService.search_chunks(workspace_id, query_vector)
+    vector_hits = await QdrantService.search_chunks(
+        workspace_id,
+        query_vector,
+        document_ids=scoped_document_ids,
+    )
     trace.append(
         _trace_event(
             "vector_lookup",
             "Vector Retrieval",
-            f"Qdrant returned {len(vector_hits)} candidate chunks for the query.",
+            f"Qdrant returned {len(vector_hits)} candidate chunks for the query using {_describe_scope(scoped_document_ids)}",
         )
     )
 
@@ -89,7 +108,10 @@ async def run_mock_agent_with_trace(query: str, workspace_id: str):
     if vector_hits:
         lines.append("Relevant chunks:")
         for hit in vector_hits[:3]:
-            lines.append(f"- score={hit['score']:.3f} text={hit['text'][:180]}")
+            lines.append(
+                f"- doc={hit.get('document_id')} chunk={hit.get('chunk_index')} "
+                f"score={hit['score']:.3f} text={hit['text'][:180]}"
+            )
 
     if not graph_hits and not vector_hits:
         lines.append("No matching knowledge was found in the local stores yet.")
@@ -141,21 +163,32 @@ def get_app():
 
 app = get_app()
 
-async def run_agent_with_trace(query: str, workspace_id: str):
+async def run_agent_with_trace(query: str, workspace_id: str, document_ids: list[str] | None = None):
+    scoped_document_ids = _normalize_document_scope(document_ids)
     if settings.LLM_PROVIDER.lower() == "mock":
-        return await run_mock_agent_with_trace(query, workspace_id)
+        return await run_mock_agent_with_trace(query, workspace_id, scoped_document_ids)
 
     if not app:
         logger.error("Cannot run agent because the LLM provider is not configured")
         raise ValueError("Cannot run agent: the configured LLM provider is not ready.")
 
     inputs = {
-        "messages": [HumanMessage(content=f"User Query: {query}\n(Internal context: workspace_id={workspace_id})")],
+        "messages": [
+            HumanMessage(
+                content=(
+                    f"User Query: {query}\n"
+                    f"(Internal context: workspace_id={workspace_id}; "
+                    f"retrieval_scope={_describe_scope(scoped_document_ids)}; "
+                    f"document_ids={scoped_document_ids})"
+                )
+            )
+        ],
         "workspace_id": workspace_id
     }
 
     trace = [
         _trace_event("receive_query", "Query Received", f"Workspace {workspace_id} submitted: {query}"),
+        _trace_event("retrieval_scope", "Retrieval Scope", _describe_scope(scoped_document_ids)),
         _trace_event("agent_start", "Agent Workflow", f"Running LangGraph workflow with {get_llm_display_name()}."),
     ]
 

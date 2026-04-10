@@ -38,6 +38,9 @@ type RecentDocumentsResponse = {
       error_message: string | null;
       created_at: string;
       completed_at: string | null;
+      is_terminal: boolean;
+      can_retry: boolean;
+      action_hint: string;
     };
   }>;
 };
@@ -54,6 +57,8 @@ type QueryResponse = {
   query: string;
   response: string;
   trace: TraceEvent[];
+  scope: "workspace" | "documents";
+  document_ids: string[];
   workspace_id: string;
 };
 
@@ -93,6 +98,8 @@ export function WorkspaceConsole() {
   const [apiBaseUrl, setApiBaseUrl] = useState(defaultApiBase);
   const [apiKey, setApiKey] = useState(defaultApiKey);
   const [query, setQuery] = useState("What is in the uploaded document?");
+  const [queryScope, setQueryScope] = useState<"workspace" | "documents">("workspace");
+  const [selectedDocumentIds, setSelectedDocumentIds] = useState<string[]>([]);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [readiness, setReadiness] = useState<ReadinessResponse | null>(null);
   const [documents, setDocuments] = useState<RecentDocumentsResponse["documents"]>([]);
@@ -121,6 +128,12 @@ export function WorkspaceConsole() {
   useEffect(() => {
     window.localStorage.setItem("sovereignrag.apiKey", apiKey);
   }, [apiKey]);
+
+  useEffect(() => {
+    if (queryScope === "workspace") {
+      setSelectedDocumentIds([]);
+    }
+  }, [queryScope]);
 
   async function fetchReadiness() {
     setStatusMessage("Refreshing backend readiness...");
@@ -201,7 +214,25 @@ export function WorkspaceConsole() {
 
     const data = await response.json();
     setActiveJobId(jobId);
-    setStatusMessage(`Job ${jobId} is ${data.status}.`);
+    setStatusMessage(data.action_hint ?? `Job ${jobId} is ${data.status}.`);
+    await fetchRecentDocuments();
+  }
+
+  async function retryJob(jobId: string) {
+    setStatusMessage(`Retrying job ${jobId}...`);
+    const response = await fetch(`${apiBaseUrl}/api/v1/documents/${jobId}/retry`, {
+      method: "POST",
+      headers: { Authorization: apiKey },
+    });
+
+    if (!response.ok) {
+      setStatusMessage(await parseError(response));
+      return;
+    }
+
+    const data = await response.json();
+    setActiveJobId(data.retry_job.job_id);
+    setStatusMessage(`Retry queued as job ${data.retry_job.job_id}.`);
     await fetchRecentDocuments();
   }
 
@@ -229,9 +260,19 @@ export function WorkspaceConsole() {
   }
 
   async function runStreamedQuery() {
+    if (queryScope === "documents" && selectedDocumentIds.length === 0) {
+      setStatusMessage("Select at least one document before running a document-scoped query.");
+      return;
+    }
+
     setStatusMessage("Streaming reasoning trace...");
     setTrace([]);
     setResponseText("");
+
+    const payload =
+      queryScope === "documents"
+        ? { query, scope: queryScope, document_ids: selectedDocumentIds }
+        : { query, scope: queryScope };
 
     const response = await fetch(`${apiBaseUrl}/api/v1/query/stream`, {
       method: "POST",
@@ -239,7 +280,7 @@ export function WorkspaceConsole() {
         Authorization: apiKey,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ query }),
+      body: JSON.stringify(payload),
     });
 
     if (!response.ok || !response.body) {
@@ -280,7 +321,11 @@ export function WorkspaceConsole() {
           setResponseText(message.data.response);
           setTrace(message.data.trace);
           setWorkspaceId(message.data.workspace_id);
-          setStatusMessage("Query completed.");
+          setStatusMessage(
+            message.data.scope === "documents"
+              ? `Query completed with ${message.data.document_ids.length} selected document(s).`
+              : "Query completed across the full workspace."
+          );
         }
 
         if (message.type === "error") {
@@ -400,11 +445,19 @@ export function WorkspaceConsole() {
                       <LoadingDots active={item.job?.status === "PENDING" || item.job?.status === "PROCESSING"} />
                     </span>
                     {item.job && (
-                      <button className="ghost-button small-button" onClick={() => startTransition(() => checkJob(item.job!.job_id).catch((error: Error) => setStatusMessage(error.message)))}>
-                        Check Job
-                      </button>
+                      <>
+                        <button className="ghost-button small-button" onClick={() => startTransition(() => checkJob(item.job!.job_id).catch((error: Error) => setStatusMessage(error.message)))}>
+                          Check Job
+                        </button>
+                        {item.job.can_retry && (
+                          <button className="ghost-button small-button" onClick={() => startTransition(() => retryJob(item.job!.job_id).catch((error: Error) => setStatusMessage(error.message)))}>
+                            Retry
+                          </button>
+                        )}
+                      </>
                     )}
                   </div>
+                  {item.job?.action_hint && <p className="document-meta">{item.job.action_hint}</p>}
                   {item.job?.error_message && <p className="error-copy">{item.job.error_message}</p>}
                 </div>
               ))
@@ -423,6 +476,35 @@ export function WorkspaceConsole() {
             <span>Question</span>
             <textarea rows={4} value={query} onChange={(event) => setQuery(event.target.value)} />
           </label>
+          <div className="field-grid">
+            <label className="field">
+              <span>Retrieval Scope</span>
+              <select value={queryScope} onChange={(event) => setQueryScope(event.target.value as "workspace" | "documents")}>
+                <option value="workspace">Full workspace</option>
+                <option value="documents">Selected documents only</option>
+              </select>
+            </label>
+            <label className="field">
+              <span>Selected Documents</span>
+              <select
+                multiple
+                value={selectedDocumentIds}
+                disabled={queryScope !== "documents" || documents.length === 0}
+                onChange={(event) =>
+                  setSelectedDocumentIds(Array.from(event.target.selectedOptions, (option) => option.value))
+                }
+              >
+                {documents.map((item) => (
+                  <option key={item.document_id} value={item.document_id}>
+                    {item.filename}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+          {queryScope === "documents" && selectedDocumentIds.length === 0 && (
+            <p className="muted-copy">Select at least one document to run a document-scoped query.</p>
+          )}
           <div className="response-grid">
             <div className="response-panel">
               <h3>Reasoning Trace</h3>
