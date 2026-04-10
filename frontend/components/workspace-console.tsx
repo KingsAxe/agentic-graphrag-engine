@@ -60,6 +60,25 @@ type QueryResponse = {
 const defaultApiBase = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000";
 const defaultApiKey = "Bearer rag-dev-123456789";
 
+function LoadingDots({ active }: { active: boolean }) {
+  const [count, setCount] = useState(1);
+
+  useEffect(() => {
+    if (!active) {
+      setCount(1);
+      return;
+    }
+
+    const timer = window.setInterval(() => {
+      setCount((current) => (current >= 4 ? 1 : current + 1));
+    }, 380);
+
+    return () => window.clearInterval(timer);
+  }, [active]);
+
+  return <span className="loading-dots">{active ? ".".repeat(count) : ""}</span>;
+}
+
 async function parseError(response: Response) {
   const text = await response.text();
   try {
@@ -378,6 +397,7 @@ export function WorkspaceConsole() {
                   <div className="job-block">
                     <span className={`pill pill-${item.job?.status?.toLowerCase() ?? "idle"}`}>
                       {item.job?.status ?? "NO JOB"}
+                      <LoadingDots active={item.job?.status === "PENDING" || item.job?.status === "PROCESSING"} />
                     </span>
                     {item.job && (
                       <button className="ghost-button small-button" onClick={() => startTransition(() => checkJob(item.job!.job_id).catch((error: Error) => setStatusMessage(error.message)))}>

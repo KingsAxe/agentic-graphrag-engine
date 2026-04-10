@@ -31,6 +31,23 @@ async def upload_document(
         logger.warning("Rejected upload for workspace %s due to unsupported file type: %s", workspace.id, file.filename)
         raise HTTPException(status_code=400, detail="Only PDF and TXT files are supported")
 
+    duplicate_stmt = select(Document).where(
+        Document.workspace_id == workspace.id,
+        Document.filename == file.filename,
+    )
+    duplicate_result = await db.execute(duplicate_stmt)
+    existing_document = duplicate_result.scalars().first()
+    if existing_document:
+        logger.warning(
+            "Rejected duplicate upload for workspace %s and filename %s",
+            workspace.id,
+            file.filename,
+        )
+        raise HTTPException(
+            status_code=409,
+            detail="A document with this filename already exists in the current workspace. Reset the workspace or rename the file before uploading again.",
+        )
+
     # 1. Save file locally for the worker
     file_path = os.path.join(UPLOAD_DIR, f"{workspace.id}_{file.filename}")
     async with aiofiles.open(file_path, 'wb') as out_file:

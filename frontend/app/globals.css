@@ -242,6 +242,7 @@ textarea {
   font-size: 0.72rem;
   letter-spacing: 0.08em;
   text-transform: uppercase;
+  gap: 4px;
 }
 
 .pill-completed,
@@ -265,6 +266,12 @@ textarea {
 .pill-idle {
   background: rgba(65, 49, 29, 0.08);
   color: var(--muted);
+}
+
+.loading-dots {
+  display: inline-block;
+  min-width: 1.5rem;
+  text-align: left;
 }
 
 .trace-head {
